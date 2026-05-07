@@ -1,6 +1,10 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -35,9 +39,23 @@ function extractSchemaArtifacts(messages: Message[]) {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.role !== 'assistant') continue;
-    const blocks = [...msg.content.matchAll(/```sql\n([\s\S]*?)```/g)].map((m) =>
-      m[1].trim(),
-    );
+
+    const blocks: string[] = [];
+    const text = msg.content;
+    const opener = '```sql\n';
+    let pos = 0;
+    while (true) {
+      const start = text.indexOf(opener, pos);
+      if (start === -1) break;
+      const contentStart = start + opener.length;
+      const closing = text.indexOf('```', contentStart);
+      const contentEnd = closing === -1 ? text.length : closing;
+      const block = text.slice(contentStart, contentEnd).trim();
+      if (block) blocks.push(block);
+      if (closing === -1) break;
+      pos = closing + 3;
+    }
+
     if (blocks.length > 0) {
       return { schema: blocks[0] ?? null, migration: blocks[1] ?? null };
     }
@@ -288,14 +306,103 @@ function MessageBubble({
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
       <div
-        className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+        className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
           isUser
-            ? 'bg-emerald-500 text-zinc-950 rounded-br-sm font-medium'
+            ? 'bg-emerald-500 text-zinc-950 rounded-br-sm font-medium whitespace-pre-wrap'
             : 'bg-zinc-900 text-zinc-100 border border-zinc-800/80 rounded-bl-sm'
         }`}
       >
-        {content}
+        {isUser ? content : <AssistantMarkdown content={content} />}
       </div>
+    </div>
+  );
+}
+
+function AssistantMarkdown({ content }: { content: string }) {
+  return (
+    <div className="markdown-body">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          p: ({ children }) => (
+            <p className="mb-2 last:mb-0">{children}</p>
+          ),
+          h1: ({ children }) => (
+            <h2 className="text-base font-semibold mt-3 mb-2 first:mt-0">{children}</h2>
+          ),
+          h2: ({ children }) => (
+            <h2 className="text-base font-semibold mt-3 mb-2 first:mt-0">{children}</h2>
+          ),
+          h3: ({ children }) => (
+            <h3 className="text-[13px] font-semibold mt-3 mb-2 first:mt-0 text-emerald-400 uppercase tracking-wide">
+              {children}
+            </h3>
+          ),
+          ul: ({ children }) => (
+            <ul className="list-disc ml-5 mb-2 space-y-1 marker:text-zinc-600">{children}</ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="list-decimal ml-5 mb-2 space-y-1 marker:text-zinc-600">{children}</ol>
+          ),
+          strong: ({ children }) => (
+            <strong className="font-semibold text-zinc-50">{children}</strong>
+          ),
+          em: ({ children }) => <em className="italic text-zinc-300">{children}</em>,
+          a: ({ children, href }) => (
+            <a href={href} className="text-emerald-400 underline hover:text-emerald-300" target="_blank" rel="noreferrer">
+              {children}
+            </a>
+          ),
+          code: ({ className, children, ...props }) => {
+            const match = /language-(\w+)/.exec(className || '');
+            const lang = match?.[1];
+            const raw = String(children).replace(/\n$/, '');
+
+            if (lang === 'sql') {
+              const lines = raw.trim().split('\n').length;
+              return (
+                <div className="my-3 rounded-lg border border-emerald-500/30 bg-emerald-500/[0.06] px-3 py-2.5 flex items-center gap-2.5 text-xs">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-emerald-400 shrink-0">
+                    <ellipse cx="12" cy="5" rx="9" ry="3" />
+                    <path d="M3 5v14a9 3 0 0 0 18 0V5" />
+                    <path d="M3 12a9 3 0 0 0 18 0" />
+                  </svg>
+                  <span className="text-emerald-300 font-medium">SQL generated</span>
+                  <span className="text-zinc-600">·</span>
+                  <span className="text-zinc-400">{lines} {lines === 1 ? 'line' : 'lines'}</span>
+                  <span className="ml-auto text-zinc-500 hidden sm:inline">→ See panel</span>
+                </div>
+              );
+            }
+
+            if (lang) {
+              return (
+                <SyntaxHighlighter
+                  language={lang}
+                  style={oneDark}
+                  PreTag="div"
+                  customStyle={{
+                    margin: '0.5em 0',
+                    background: 'rgb(24 24 27)',
+                    borderRadius: '0.5rem',
+                    fontSize: '0.8125rem',
+                  }}
+                >
+                  {raw}
+                </SyntaxHighlighter>
+              );
+            }
+
+            return (
+              <code className="bg-zinc-800 text-zinc-200 px-1.5 py-0.5 rounded text-[12px] font-mono" {...props}>
+                {children}
+              </code>
+            );
+          },
+        }}
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }
@@ -464,9 +571,29 @@ function SchemaArtifact({
 
       <div className="flex-1 overflow-auto bg-zinc-950">
         {code ? (
-          <pre className="text-[13px] font-mono text-zinc-200 p-5 leading-relaxed">
-            <code>{code}</code>
-          </pre>
+          <SyntaxHighlighter
+            language="sql"
+            style={oneDark}
+            showLineNumbers
+            customStyle={{
+              margin: 0,
+              padding: '1.25rem 1.25rem 1.25rem 0.5rem',
+              background: 'transparent',
+              fontSize: '13px',
+              lineHeight: '1.65',
+            }}
+            lineNumberStyle={{
+              color: 'rgb(82 82 91)',
+              minWidth: '2.5em',
+              paddingRight: '1em',
+              userSelect: 'none',
+            }}
+            codeTagProps={{
+              style: { background: 'transparent', fontFamily: 'var(--font-mono, monospace)' },
+            }}
+          >
+            {code}
+          </SyntaxHighlighter>
         ) : (
           <div className="h-full flex items-center justify-center text-sm text-zinc-500">
             No {activeTab} available
