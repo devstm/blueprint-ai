@@ -114,7 +114,16 @@ export default function Home() {
         }),
       });
 
-      if (!res.ok || !res.body) throw new Error('Request failed');
+      if (!res.ok) {
+        let errMsg = 'Something went wrong. Please try again.';
+        try {
+          const data = await res.json();
+          if (typeof data?.error === 'string') errMsg = data.error;
+        } catch {}
+        throw new Error(errMsg);
+      }
+
+      if (!res.body) throw new Error('Empty response from server.');
 
       tick();
 
@@ -131,15 +140,30 @@ export default function Home() {
       while (displayed.length < target.length) {
         await new Promise((r) => setTimeout(r, REVEAL_INTERVAL_MS));
       }
-    } catch {
+    } catch (err) {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+
+      const errMsg =
+        err instanceof Error
+          ? err.message
+          : 'Something went wrong. Please try again.';
+
       if (!assistantStarted) {
         setMessages((prev) => [
           ...prev,
-          {
-            role: 'assistant',
-            content: 'Something went wrong. Please try again.',
-          },
+          { role: 'assistant', content: errMsg },
         ]);
+      } else {
+        const finalContent = `${displayed}\n\n[${errMsg}]`;
+        setMessages((prev) => {
+          const updated = [...prev];
+          updated[updated.length - 1] = {
+            role: 'assistant',
+            content: finalContent,
+          };
+          return updated;
+        });
       }
     } finally {
       stopped = true;
