@@ -1,5 +1,5 @@
 import Groq from "groq-sdk";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
@@ -58,7 +58,7 @@ Then immediately output:
 export async function POST(req: NextRequest) {
   const { messages } = await req.json();
 
-  const response = await groq.chat.completions.create({
+  const completion = await groq.chat.completions.create({
     model: "llama-3.3-70b-versatile",
     messages: [
       { role: "system", content: SYSTEM_PROMPT },
@@ -66,10 +66,21 @@ export async function POST(req: NextRequest) {
     ],
     temperature: 0.7,
     max_tokens: 4096,
-    stream: false,
+    stream: true,
   });
 
-  const content = response.choices[0].message.content;
+  const encoder = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      for await (const chunk of completion) {
+        const text = chunk.choices[0]?.delta?.content;
+        if (text) controller.enqueue(encoder.encode(text));
+      }
+      controller.close();
+    },
+  });
 
-  return NextResponse.json({ message: content });
+  return new Response(body, {
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
 }
